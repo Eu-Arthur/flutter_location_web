@@ -1,59 +1,70 @@
-import 'dart:html'
-    show Geolocation, Geoposition, Navigator, Permissions, window;
 import 'dart:ui' show Color;
-
+import 'package:js/js.dart';
 import 'package:location_platform_interface/location_platform_interface.dart';
+import 'package:location_web/JSLocation.dart';
+
 
 /// The Web implementation of [LocationPlatform].
 class LocationWeb extends LocationPlatform {
   /// The Web implementation of [LocationPlatform].
-  LocationWeb(Navigator navigator)
-      : _geolocation = navigator.geolocation,
-        _permissions = navigator.permissions;
+  LocationWeb();
+
+  LocationAccuracy? _accuracy;
 
   /// Registers this class as the default instance of [LocationPlatform]
   static void registerWith([Object? registrar]) {
-    LocationPlatform.instance = LocationWeb(window.navigator);
+    LocationPlatform.instance = LocationWeb();
   }
-
-  final Geolocation _geolocation;
-  final Permissions? _permissions;
-
-  LocationAccuracy _accuracy = LocationAccuracy.high;
 
   @override
   Future<LocationData?> getLocation({LocationSettings? settings}) async {
-    final result = await _geolocation.getCurrentPosition(
-      enableHighAccuracy: (settings?.accuracy.index ?? _accuracy.index) >=
-          LocationAccuracy.high.index,
+    final List<LocationData> reference = [];
+    getCurrentPosition(
+      allowInterop((JSGeoPosition result) {
+        reference.add(LocationData(
+            latitude: result.coords.latitude.toDouble(),
+            longitude: result.coords.longitude.toDouble(),
+            bearing: result.coords.heading.toDouble(),
+            altitude: result.coords.altitude.toDouble(),
+            speed: result.coords.speed.toDouble(),
+            accuracy: result.coords.accuracy.toDouble(),
+            verticalAccuracy: result.coords.altitudeAccuracy.toDouble(),
+            time: double.parse(result.times)));
+      }),
     );
-
-    return _toLocationData(result);
+    return Future.doWhile(() => reference.isEmpty).then((value) {
+      return reference.first;
+    });
   }
 
   @override
-  Stream<LocationData?> onLocationChanged({bool inBackground = false}) =>
-      _geolocation
-          .watchPosition(
-            enableHighAccuracy: _accuracy.index >= LocationAccuracy.high.index,
-          )
-          .map(_toLocationData);
+  Stream<LocationData?> onLocationChanged({bool inBackground = false}) {
+    final List<LocationData?> reference = [];
+    final List<bool> blocked = [];
+    getCurrentPosition(
+      allowInterop((JSGeoPosition result) {
+        reference.add(LocationData(
+            latitude: result.coords.latitude.toDouble(),
+            longitude: result.coords.longitude.toDouble(),
+            bearing: result.coords.heading.toDouble(),
+            altitude: result.coords.altitude.toDouble(),
+            speed: result.coords.speed.toDouble(),
+            accuracy: result.coords.accuracy.toDouble(),
+            verticalAccuracy: result.coords.altitudeAccuracy.toDouble(),
+            time: double.parse(result.times)));
+        blocked.add(false);
+      }),
+    );
+    return Stream.fromFuture(
+      Future.doWhile(() => blocked.isEmpty).then((value) {
+        return reference.first;
+      }),
+    );
+  }
 
   @override
   Future<PermissionStatus?> getPermissionStatus() async {
-    final result =
-        await _permissions!.query(<String, String>{'name': 'geolocation'});
-
-    switch (result.state) {
-      case 'granted':
-        return PermissionStatus.authorizedAlways;
-      case 'prompt':
-        return PermissionStatus.notDetermined;
-      case 'denied':
-        return PermissionStatus.denied;
-      default:
-        throw ArgumentError('Unknown permission ${result.state}.');
-    }
+    return getPermissionLocation();
   }
 
   @override
@@ -69,7 +80,7 @@ class LocationWeb extends LocationPlatform {
   @override
   Future<PermissionStatus?> requestPermission() async {
     try {
-      await _geolocation.getCurrentPosition();
+      await getLocation(settings: LocationSettings());
       return PermissionStatus.authorizedAlways;
     } catch (e) {
       return PermissionStatus.denied;
@@ -80,19 +91,6 @@ class LocationWeb extends LocationPlatform {
   Future<bool?> setLocationSettings(LocationSettings settings) async {
     _accuracy = settings.accuracy;
     return true;
-  }
-
-  LocationData _toLocationData(Geoposition result) {
-    return LocationData(
-      latitude: result.coords?.latitude?.toDouble(),
-      longitude: result.coords?.longitude?.toDouble(),
-      bearing: result.coords?.heading?.toDouble(),
-      altitude: result.coords?.altitude?.toDouble(),
-      speed: result.coords?.speed?.toDouble(),
-      accuracy: result.coords?.accuracy?.toDouble(),
-      verticalAccuracy: result.coords?.altitudeAccuracy?.toDouble(),
-      time: result.timestamp?.toDouble(),
-    );
   }
 
   @override
